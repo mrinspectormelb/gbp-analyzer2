@@ -9,53 +9,58 @@ HEADERS = {
                   "Chrome/115.0 Safari/537.36"
 }
 
+def scrape_google_maps(keyword: str, location: str, max_results=5):
+    """Scrape top competitors from Google Maps search (public data only)."""
+    search_url = f"https://www.google.com/maps/search/{keyword}+{location.replace(' ', '+')}"
+    response = requests.get(search_url, headers=HEADERS)
+    if response.status_code != 200:
+        raise Exception(f"Google Maps request failed: {response.status_code}")
+
+    soup = BeautifulSoup(response.text, "lxml")
+    results = []
+
+    # Heuristic: find business name divs (replace with better parsing later)
+    businesses = soup.find_all("div", string=re.compile(keyword, re.I))
+    for b in businesses[:max_results]:
+        name = b.get_text().strip()
+        business = {
+            "name": name,
+            "categories": [keyword],
+            "reviews": 0,          # parse real review count here
+            "stars": 0.0,          # parse stars here
+            "photos": 0,           # parse photo count
+            "posts_per_month": 0,  # estimate from posts if visible
+            "keywords_in_reviews": []  # extract common words
+        }
+        results.append(business)
+        time.sleep(0.5)
+    return results
+
 def fetch_target_business_panel(business_name: str, location: str):
-    """
-    Fetch basic info for a specific business from Google Maps search.
-    Public data only.
-    """
+    """Scrape the target business panel from Google Maps."""
     query = f"{business_name} {location}".replace(" ", "+")
     url = f"https://www.google.com/maps/search/{query}"
-    
     response = requests.get(url, headers=HEADERS)
     if response.status_code != 200:
         raise Exception(f"Google Maps request failed: {response.status_code}")
-    
+
     soup = BeautifulSoup(response.text, "lxml")
 
-    # Heuristic parsing: find business name in the search results
+    # Heuristic: find the exact business panel
     panel = soup.find("div", string=re.compile(business_name, re.I))
     if not panel:
-        # fallback: use first search result
         panel = soup.find("div", string=re.compile(location.split()[0], re.I))
         if not panel:
             raise Exception("Target business panel not found")
-    
-    # Extract pseudo-real data (replace with real parsing later)
+
     target_data = {
         "name": business_name,
-        "categories": ["Plumber"],  # placeholder for now
-        "reviews": 0,
-        "stars": 0,
-        "photos": 0,
-        "posts_per_month": 0,
-        "keywords_in_reviews": []
+        "categories": [business_name],  # replace with parsed categories
+        "reviews": 0,                   # parse review count
+        "stars": 0.0,                   # parse star rating
+        "photos": 0,                     # parse photo count
+        "posts_per_month": 0,            # estimate
+        "keywords_in_reviews": []        # extract keywords
     }
-
-    # Extract approximate reviews/stars if present
-    review_span = soup.find("span", string=re.compile(r"\d+ reviews", re.I))
-    if review_span:
-        m = re.search(r"(\d+) reviews", review_span.text)
-        if m:
-            target_data["reviews"] = int(m.group(1))
-    
-    star_span = soup.find("span", string=re.compile(r"\d(\.\d)?/5", re.I))
-    if star_span:
-        m = re.search(r"(\d(\.\d)?)/5", star_span.text)
-        if m:
-            target_data["stars"] = float(m.group(1))
-    
-    # TODO: extract photos count / posts / review keywords later
-
-    time.sleep(0.5)  # polite delay
+    time.sleep(0.5)
     return target_data
