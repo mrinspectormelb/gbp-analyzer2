@@ -1,66 +1,68 @@
-import requests
-from bs4 import BeautifulSoup
-import re
+from playwright.sync_api import sync_playwright
 import time
+import random
+import re
 
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                  "AppleWebKit/537.36 (KHTML, like Gecko) "
-                  "Chrome/115.0 Safari/537.36"
-}
+def scrape_google_maps(keyword, location, max_results=5):
 
-def scrape_google_maps(keyword: str, location: str, max_results=5):
-    """Scrape top competitors from Google Maps search (public data only)."""
-    search_url = f"https://www.google.com/maps/search/{keyword}+{location.replace(' ', '+')}"
-    response = requests.get(search_url, headers=HEADERS)
-    if response.status_code != 200:
-        raise Exception(f"Google Maps request failed: {response.status_code}")
-
-    soup = BeautifulSoup(response.text, "lxml")
     results = []
 
-    # Heuristic: find business name divs (replace with better parsing later)
-    businesses = soup.find_all("div", string=re.compile(keyword, re.I))
-    for b in businesses[:max_results]:
-        name = b.get_text().strip()
-        business = {
-            "name": name,
-            "categories": [keyword],
-            "reviews": 0,          # parse real review count here
-            "stars": 0.0,          # parse stars here
-            "photos": 0,           # parse photo count
-            "posts_per_month": 0,  # estimate from posts if visible
-            "keywords_in_reviews": []  # extract common words
-        }
-        results.append(business)
-        time.sleep(0.5)
+    with sync_playwright() as p:
+
+        browser = p.chromium.launch(
+            headless=True,
+            args=[
+                "--no-sandbox",
+                "--disable-dev-shm-usage"
+            ]
+        )
+
+        page = browser.new_page()
+
+        url = f"https://www.google.com/maps/search/{keyword}+{location.replace(' ', '+')}"
+        page.goto(url)
+
+        # wait for listings to load
+        page.wait_for_selector("div[role='article']")
+
+        listings = page.query_selector_all("div[role='article']")
+
+        for listing in listings[:max_results]:
+
+            name_el = listing.query_selector("div.fontHeadlineSmall")
+            rating_el = listing.query_selector("span[aria-label*='stars']")
+
+            name = name_el.inner_text() if name_el else "Unknown"
+            stars = 0.0
+            reviews = 0
+
+            if rating_el:
+                aria = rating_el.get_attribute("aria-label")
+                match = re.search(r"(\d\.\d).*?(\d+)", aria)
+                if match:
+                    stars = float(match.group(1))
+                    reviews = int(match.group(2))
+
+            results.append({
+                "name": name,
+                "categories": [],
+                "reviews": reviews,
+                "stars": stars,
+                "photos": 0,
+                "posts_per_month": 0,
+                "keywords_in_reviews": []
+            })
+
+        browser.close()
+
     return results
 
-def fetch_target_business_panel(business_name: str, location: str):
-    """Scrape the target business panel from Google Maps."""
-    query = f"{business_name} {location}".replace(" ", "+")
-    url = f"https://www.google.com/maps/search/{query}"
-    response = requests.get(url, headers=HEADERS)
-    if response.status_code != 200:
-        raise Exception(f"Google Maps request failed: {response.status_code}")
 
-    soup = BeautifulSoup(response.text, "lxml")
+def fetch_target_business_panel(business_name, location):
 
-    # Heuristic: find the exact business panel
-    panel = soup.find("div", string=re.compile(business_name, re.I))
-    if not panel:
-        panel = soup.find("div", string=re.compile(location.split()[0], re.I))
-        if not panel:
-            raise Exception("Target business panel not found")
+    results = scrape_google_maps(business_name, location, 1)
 
-    target_data = {
-        "name": business_name,
-        "categories": [business_name],  # replace with parsed categories
-        "reviews": 0,                   # parse review count
-        "stars": 0.0,                   # parse star rating
-        "photos": 0,                     # parse photo count
-        "posts_per_month": 0,            # estimate
-        "keywords_in_reviews": []        # extract keywords
-    }
-    time.sleep(0.5)
-    return target_data
+    if not results:
+        raise Exception("Target business not found")
+
+    return results[0]
