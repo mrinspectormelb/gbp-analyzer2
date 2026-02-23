@@ -1,14 +1,13 @@
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
-import requests
+from pydantic import BaseModel
+from scraper import scrape_google_maps, fetch_target_business_panel
 
 app = FastAPI(title="GBP Gap Analyzer")
 
-# Allow WordPress to call this API (for testing)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Replace with your WordPress domain in production
+    allow_origins=["*"],  # replace with your WP domain in production
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -18,87 +17,60 @@ class GBPRequest(BaseModel):
     location: str
     target_business_name: str
 
-def simulate_gbp_fetch(business_name, location):
-    """
-    Fake function to simulate fetching GBP data.
-    Replace with Google API or scraping logic later.
-    Returns a dict with categories, review_count, photos.
-    """
-    # Example mock data
-    data = {
-        "categories": ["Plumber", "Emergency Plumbing"],
-        "review_count": 35,
-        "photos": 12,
-        "posts_per_month": 2
-    }
-    return data
-
 def compute_gap_score(target, competitors):
-    """
-    Compute a simple gap score:
-    - Missing categories, low reviews, few photos/posts reduce score
-    """
     score = 100
+    if not competitors:
+        return score, []
 
-    # Check categories
-    competitor_categories = set()
-    for c in competitors:
-        competitor_categories.update(c["categories"])
-    missing_categories = set(competitor_categories) - set(target["categories"])
-    score -= len(missing_categories) * 10
+    avg_reviews = sum(c["reviews"] for c in competitors)/len(competitors)
+    avg_photos = sum(c["photos"] for c in competitors)/len(competitors)
+    avg_posts = sum(c["posts_per_month"] for c in competitors)/len(competitors)
 
-    # Reviews
-    avg_comp_reviews = sum(c["review_count"] for c in competitors) / len(competitors)
-    if target["review_count"] < avg_comp_reviews:
+    missing_categories = []
+    competitor_categories = set(cat for c in competitors for cat in c["categories"])
+    for cat in competitor_categories:
+        if cat not in target["categories"]:
+            missing_categories.append(cat)
+            score -= 10
+
+    if target["reviews"] < avg_reviews:
         score -= 15
-
-    # Photos
-    avg_comp_photos = sum(c["photos"] for c in competitors) / len(competitors)
-    if target["photos"] < avg_comp_photos:
+    if target["stars"] < sum(c["stars"] for c in competitors)/len(competitors):
         score -= 10
-
-    # Posts
-    avg_comp_posts = sum(c["posts_per_month"] for c in competitors) / len(competitors)
-    if target["posts_per_month"] < avg_comp_posts:
+    if target["photos"] < avg_photos:
+        score -= 10
+    if target["posts_per_month"] < avg_posts:
         score -= 5
 
-    return max(score, 0), missing_categories
+    return max(score,0), missing_categories
 
 @app.post("/analyze-gbp")
 def analyze(data: GBPRequest):
     try:
-        # Fetch target business data
-        target_data = simulate_gbp_fetch(data.target_business_name, data.location)
+        competitors = scrape_google_maps(data.keyword, data.location, max_results=5)
+        target = fetch_target_business_panel(data.target_business_name, data.location)
 
-        # Simulate 2 competitors for MVP
-        competitors = [
-            simulate_gbp_fetch("Competitor 1", data.location),
-            simulate_gbp_fetch("Competitor 2", data.location)
-        ]
+        gap_score, missing_categories = compute_gap_score(target, competitors)
 
-        gap_score, missing_categories = compute_gap_score(target_data, competitors)
-
-        # Build actions list dynamically
         actions = []
-
         for cat in missing_categories:
             actions.append(["HIGH", f"Add missing category: {cat}"])
-
-        if target_data["review_count"] < sum(c["review_count"] for c in competitors)/len(competitors):
+        if target["reviews"] < sum(c["reviews"] for c in competitors)/len(competitors):
             actions.append(["HIGH", "Increase reviews to match competitors"])
-
-        if target_data["photos"] < sum(c["photos"] for c in competitors)/len(competitors):
+        if target["photos"] < sum(c["photos"] for c in competitors)/len(competitors):
             actions.append(["MEDIUM", "Upload more photos"])
-
-        if target_data["posts_per_month"] < sum(c["posts_per_month"] for c in competitors)/len(competitors):
-            actions.append(["MEDIUM", "Post more updates monthly"])
+        if target["posts_per_month"] < sum(c["posts_per_month"] for c in competitors)/len(competitors):
+            actions.append(["MEDIUM", "Post updates monthly"])
 
         verdict = "Competitive" if gap_score >= 70 else "Uncompetitive"
 
         return {
+            "target_business": target["name"],
+            "location": data.location,
             "gap_score": gap_score,
             "verdict": verdict,
-            "actions": actions
+            "competitor_comparison": competitors,
+            "gap_summary": actions
         }
 
     except Exception as e:
