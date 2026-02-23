@@ -10,12 +10,13 @@ def scrape_google_maps(keyword, location, max_results=5):
     with sync_playwright() as p:
 
         browser = p.chromium.launch(
-            headless=True,
-            args=[
-                "--no-sandbox",
-                "--disable-dev-shm-usage"
-            ]
-        )
+    headless=True,
+    channel="chromium",   # IMPORTANT
+    args=[
+        "--no-sandbox",
+        "--disable-dev-shm-usage"
+    ]
+)
 
         page = browser.new_page()
 
