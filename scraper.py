@@ -29,6 +29,9 @@ def scrape_google_maps(keyword: str, location: str, max_results=5):
 
         page.goto(search_url, timeout=60000)
 
+        page.screenshot(path="/tmp/debug.png")
+print(page.content()[:1000])
+
         # Allow time for Maps JS to load
         page.wait_for_timeout(5000)
 
