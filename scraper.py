@@ -20,47 +20,63 @@ def scrape_google_maps(keyword: str, location: str, max_results=5):
         )
 
         page = browser.new_page(
-            viewport={
-                "width": random.randint(1280, 1600),
-                "height": random.randint(700, 1000)
-            },
+            viewport={"width": 1366, "height": 768},
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36"
         )
 
+        # Build Google Maps search URL
         search_url = f"https://www.google.com/maps/search/{keyword}+{location.replace(' ', '+')}"
 
         page.goto(search_url, timeout=60000)
 
-        # Give page time to load
+        # Allow time for Maps JS to load
         page.wait_for_timeout(5000)
 
-        # Handle Google consent screen if shown
+        # Handle consent popup if shown
         try:
             page.click("button:has-text('Accept')", timeout=5000)
             page.wait_for_timeout(2000)
         except:
             pass
 
-        # Wait for business links instead of fragile layout selectors
+        # Wait for business links (more stable selector)
         page.wait_for_selector("a[href*='/maps/place/']", timeout=20000)
 
-        listings = page.query_selector_all("a[href*='/maps/place/']")
+        link_elements = page.query_selector_all("a[href*='/maps/place/']")
 
-        for listing in listings[:max_results]:
+        business_links = []
 
-            name = listing.inner_text().strip()
+        # Extract links FIRST (important — avoids stale DOM errors)
+        for el in link_elements[:max_results]:
+            href = el.get_attribute("href")
+            if href and "/maps/place/" in href:
+                business_links.append(href)
 
-            # Click into listing for detailed info
-            listing.click()
-            page.wait_for_timeout(4000)
+        # Visit each business page separately
+        for link in business_links:
 
+            page.goto(link)
+
+            # Give time for business panel to load
+            page.wait_for_timeout(random.randint(3000, 5000))
+
+            name = ""
             stars = 0.0
             reviews = 0
 
+            # Extract business name
             try:
-                rating_element = page.query_selector("div[role='img'][aria-label*='stars']")
-                if rating_element:
-                    aria = rating_element.get_attribute("aria-label")
+                name_el = page.query_selector("h1")
+                if name_el:
+                    name = name_el.inner_text()
+            except:
+                pass
+
+            # Extract rating + review count
+            try:
+                rating_el = page.query_selector("div[role='img'][aria-label*='stars']")
+                if rating_el:
+                    aria = rating_el.get_attribute("aria-label")
                     match = re.search(r"(\d\.\d).*?(\d+)", aria)
                     if match:
                         stars = float(match.group(1))
@@ -77,10 +93,6 @@ def scrape_google_maps(keyword: str, location: str, max_results=5):
                 "posts_per_month": 0,
                 "keywords_in_reviews": []
             })
-
-            # Go back to results
-            page.go_back()
-            page.wait_for_timeout(random.randint(2000, 4000))
 
         browser.close()
 
