@@ -53,7 +53,15 @@ def scrape_google_maps(keyword: str, location: str, max_results=5):
         page.wait_for_timeout(4000)
 
         # Wait for listing links
-        page.wait_for_selector("a[href*='/maps/place/']", timeout=20000)
+        print("PAGE TITLE:", page.title())
+        print("PAGE URL:", page.url)
+
+        html = page.content()
+
+        print("HTML SAMPLE:")
+        print(html[:1000])
+
+        raise Exception("DEBUG STOP")
 
         link_elements = page.query_selector_all("a[href*='/maps/place/']")
 
