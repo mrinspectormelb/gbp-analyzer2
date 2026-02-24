@@ -11,11 +11,12 @@ def scrape_google_maps(keyword: str, location: str, max_results=5):
     with sync_playwright() as p:
 
         browser = p.chromium.launch(
-            headless=True,
+            headless=False,
             channel="chromium",
             args=[
                 "--no-sandbox",
-                "--disable-dev-shm-usage"
+                "--disable-dev-shm-usage",
+                "--disable-blink-features=AutomationControlled"
             ]
         )
 
@@ -24,50 +25,45 @@ def scrape_google_maps(keyword: str, location: str, max_results=5):
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36"
         )
 
-        # Build Google Maps search URL
         search_url = f"https://www.google.com/maps/search/{keyword}+{location.replace(' ', '+')}"
 
         page.goto(search_url, timeout=60000)
 
-        page.screenshot(path="/tmp/debug.png")
-print(page.content()[:1000])
+        # Wait for page load
+        page.wait_for_timeout(8000)
 
-        # Allow time for Maps JS to load
-        page.wait_for_timeout(5000)
-
-        # Handle consent popup if shown
+        # Try accepting consent popup
         try:
             page.click("button:has-text('Accept')", timeout=5000)
             page.wait_for_timeout(2000)
         except:
             pass
 
-        # Wait for business links (more stable selector)
+        # Scroll to trigger results loading
+        page.mouse.wheel(0, 4000)
+        page.wait_for_timeout(3000)
+
+        # Wait for listings
         page.wait_for_selector("a[href*='/maps/place/']", timeout=20000)
 
         link_elements = page.query_selector_all("a[href*='/maps/place/']")
 
         business_links = []
 
-        # Extract links FIRST (important — avoids stale DOM errors)
         for el in link_elements[:max_results]:
             href = el.get_attribute("href")
             if href and "/maps/place/" in href:
                 business_links.append(href)
 
-        # Visit each business page separately
         for link in business_links:
 
             page.goto(link)
-
-            # Give time for business panel to load
-            page.wait_for_timeout(random.randint(3000, 5000))
+            page.wait_for_timeout(random.randint(4000, 6000))
 
             name = ""
             stars = 0.0
             reviews = 0
 
-            # Extract business name
             try:
                 name_el = page.query_selector("h1")
                 if name_el:
@@ -75,7 +71,6 @@ print(page.content()[:1000])
             except:
                 pass
 
-            # Extract rating + review count
             try:
                 rating_el = page.query_selector("div[role='img'][aria-label*='stars']")
                 if rating_el:
