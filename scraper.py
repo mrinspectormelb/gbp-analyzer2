@@ -11,7 +11,7 @@ def scrape_google_maps(keyword: str, location: str, max_results=5):
     with sync_playwright() as p:
 
         browser = p.chromium.launch(
-            headless=False,
+            headless=True,
             channel="chromium",
             args=[
                 "--no-sandbox",
@@ -20,30 +20,39 @@ def scrape_google_maps(keyword: str, location: str, max_results=5):
             ]
         )
 
-        page = browser.new_page(
+        context = browser.new_context(
             viewport={"width": 1366, "height": 768},
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36"
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
+            locale="en-AU"
         )
+
+        page = context.new_page()
 
         search_url = f"https://www.google.com/maps/search/{keyword}+{location.replace(' ', '+')}"
 
         page.goto(search_url, timeout=60000)
 
-        # Wait for page load
+        # Wait for JS to load
         page.wait_for_timeout(8000)
 
-        # Try accepting consent popup
+        # DEBUG OUTPUT (important right now)
+        print("PAGE TITLE:", page.title())
+        print("FIRST 500 CHARS:")
+        print(page.content()[:500])
+        page.screenshot(path="/tmp/debug.png")
+
+        # Try consent button
         try:
             page.click("button:has-text('Accept')", timeout=5000)
-            page.wait_for_timeout(2000)
+            page.wait_for_timeout(3000)
         except:
             pass
 
-        # Scroll to trigger results loading
-        page.mouse.wheel(0, 4000)
-        page.wait_for_timeout(3000)
+        # Scroll to trigger lazy load
+        page.mouse.wheel(0, 5000)
+        page.wait_for_timeout(4000)
 
-        # Wait for listings
+        # Wait for listing links
         page.wait_for_selector("a[href*='/maps/place/']", timeout=20000)
 
         link_elements = page.query_selector_all("a[href*='/maps/place/']")
